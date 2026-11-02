@@ -49,6 +49,19 @@ public class WorkflowDefinitionService {
             );
             definitionRepository.save(def);
         }
+
+        UUID ecommerceWorkflowId = UUID.fromString("a0000000-0000-0000-0000-000000000002");
+        if (definitionRepository.findById(ecommerceWorkflowId).isEmpty()) {
+            WorkflowDefinition ecomDef = new WorkflowDefinition(
+                    ecommerceWorkflowId,
+                    "E-Commerce Order Fulfillment Pipeline",
+                    "Sequential 6-step durable e-commerce workflow: validation, inventory reservation, payment processing, confirmation, shipment creation, and customer dispatch notification.",
+                    "{\"steps\":[{\"stepKey\":\"VALIDATE_ORDER\",\"name\":\"Validate Order & Payload\",\"order\":1},{\"stepKey\":\"RESERVE_INVENTORY\",\"name\":\"Reserve Inventory Stock\",\"order\":2},{\"stepKey\":\"INITIATE_PAYMENT\",\"name\":\"Authorize & Settle Payment\",\"order\":3},{\"stepKey\":\"CONFIRM_ORDER\",\"name\":\"Confirm Order Status\",\"order\":4},{\"stepKey\":\"PREPARE_SHIPMENT\",\"name\":\"Prepare Shipping Label\",\"order\":5},{\"stepKey\":\"SEND_NOTIFICATION\",\"name\":\"Dispatch Confirmation Notification\",\"order\":6}]}",
+                    1,
+                    null
+            );
+            definitionRepository.save(ecomDef);
+        }
     }
 
     @Transactional

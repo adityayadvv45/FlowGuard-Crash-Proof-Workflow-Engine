@@ -95,6 +95,14 @@ The project addresses these concerns through persisted execution records, condit
 
 **Important:** Exactly-once external side effects cannot be guaranteed by a local database transaction alone. An external payment provider must support and enforce the supplied idempotency key for that protection to extend across the external-system boundary.
 
+### E-commerce Order Processing Domain
+
+- **Authoritative Backend Pricing:** Client-supplied prices and totals are strictly distrusted; product prices, subtotal, 8% sales tax, and shipping thresholds ($15 or free above $200) are resolved and calculated exclusively on the server.
+- **Race-Free Atomic Inventory Reservations:** Uses database-level conditional atomic updates (`UPDATE inventory SET available = available - :qty, reserved = reserved + :qty WHERE product_id = :id AND available >= :qty`) to prevent overselling and race conditions under concurrent checkouts without deadlock-prone heavy locking.
+- **Durable 6-Step Fulfillment Pipeline:** Integrates directly with FlowGuard's core workflow engine: `VALIDATE_ORDER` $\rightarrow$ `RESERVE_INVENTORY` $\rightarrow$ `INITIATE_PAYMENT` $\rightarrow$ `CONFIRM_ORDER` $\rightarrow$ `PREPARE_SHIPMENT` $\rightarrow$ `SEND_NOTIFICATION`.
+- **Compensating Transactions & Rollback:** Automated rollback of reserved stock and payment refunds if downstream steps encounter permanent failure or if the customer initiates order cancellation.
+- **Strict Tenant Isolation & Idempotency:** Orders are tied to authenticated users (`user_id`); users cannot view or manipulate orders belonging to other accounts. Idempotent order creation deduplicates double-clicks or repeated network requests per user.
+
 ### Execution observability
 
 - Persisted execution-event history.
@@ -284,6 +292,17 @@ The following endpoints describe the implemented authentication, workflow, analy
 | `GET` | `/api/analytics/summary` | Retrieve aggregate analytics and baseline information. |
 | `POST` | `/api/analytics/simulate` | Evaluate hypothetical inputs in memory without writing to database. |
 | `GET` | `/api/executions/{id}/anomaly` | Convenience endpoint for execution anomaly analysis. |
+| `GET` | `/api/ecommerce/products` | Browse product catalog with category filter, search, and pagination. |
+| `GET` | `/api/ecommerce/products/{id}` | Retrieve individual product details and live inventory levels. |
+| `POST` | `/api/ecommerce/products` | Create a new catalog product and initialize available stock. |
+| `PUT` | `/api/ecommerce/products/{id}` | Update product details (pricing, description, active status). |
+| `GET` | `/api/ecommerce/inventory/{productId}` | Inspect inventory metrics (available, reserved, total quantity). |
+| `POST` | `/api/ecommerce/inventory/{productId}/replenish` | Controlled stock replenishment with audit justification. |
+| `POST` | `/api/ecommerce/inventory/{productId}/adjust` | Stock physical count reconciliation / audit adjustment. |
+| `POST` | `/api/ecommerce/orders` | Create order with authoritative server pricing and dispatch 6-step fulfillment workflow (`Idempotency-Key` supported). |
+| `GET` | `/api/ecommerce/orders/{id}` | Fetch complete order breakdown, items, payments, and shipments (enforces user ownership). |
+| `GET` | `/api/ecommerce/orders` | List authenticated user's orders with optional status filter and pagination. |
+| `POST` | `/api/ecommerce/orders/{id}/cancel` | Cancel an eligible order, release reserved inventory, issue refund, and halt workflow. |
 
 ### Example: Retrieve an execution assessment
 
@@ -345,6 +364,14 @@ The existing persistence model includes tables for:
 - `step_executions` — per-step execution state and attempts.
 - `execution_events` — lifecycle and diagnostic events.
 - `idempotency_records` — request idempotency information.
+- `user_accounts` — registered users with PBKDF2 password hashes (`V3__user_accounts.sql`).
+- `auth_tokens` — user session tokens with expiration tracking (`V3__user_accounts.sql`).
+- `products` — product catalog with SKU, name, price, currency, category, and active status (`V4__ecommerce_domain.sql`).
+- `inventory` — available, reserved, and total stock quantities with atomic conditional locking (`V4__ecommerce_domain.sql`).
+- `orders` — customer orders with workflow execution linkage, server-calculated totals, status, and tenant isolation (`V4__ecommerce_domain.sql`).
+- `order_items` — snapshot line items preserving SKU, unit price, and quantities (`V4__ecommerce_domain.sql`).
+- `payments` — payment records with transaction IDs, amounts, and idempotency tracking (`V4__ecommerce_domain.sql`).
+- `shipments` — shipping carrier labels, tracking numbers, and delivery estimates (`V4__ecommerce_domain.sql`).
 
 The analytics module derives its baseline from execution data rather than requiring a separate preloaded training dataset.
 
@@ -365,13 +392,39 @@ FlowGuard/
 │       │   │   ├── controller/
 │       │   │   ├── model/
 │       │   │   └── service/
+│       │   ├── auth/
+│       │   │   ├── controller/
+│       │   │   ├── dto/
+│       │   │   ├── entity/
+│       │   │   ├── repository/
+│       │   │   ├── service/
+│       │   │   └── util/
 │       │   ├── config/
 │       │   ├── controller/
+│       │   ├── dto/
+│       │   ├── ecommerce/
+│       │   │   ├── adapter/
+│       │   │   ├── controller/
+│       │   │   ├── dto/
+│       │   │   ├── entity/
+│       │   │   ├── enums/
+│       │   │   ├── repository/
+│       │   │   ├── service/
+│       │   │   └── step/
+│       │   ├── engine/
+│       │   │   └── steps/
+│       │   ├── entity/
+│       │   ├── enums/
+│       │   ├── exception/
 │       │   ├── repository/
-│       │   └── ...
+│       │   └── service/
 │       └── resources/
 │           ├── application.yml
 │           └── db/migration/
+│               ├── V1__initial_schema.sql
+│               ├── V2__seed_workflows.sql
+│               ├── V3__user_accounts.sql
+│               └── V4__ecommerce_domain.sql
 ├── frontend/
 │   ├── src/
 │   │   ├── components/

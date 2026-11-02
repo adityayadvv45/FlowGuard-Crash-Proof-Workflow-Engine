@@ -9,3 +9,4 @@ public record UpdateAccountRequest(
         @Size(min = 6, max = 100, message = "New password must be at least 6 characters")
         String newPassword
 ) {}
+

@@ -13,3 +13,4 @@ public record AuthResponse(
         OffsetDateTime createdAt,
         OffsetDateTime lastLoginAt
 ) {}
+

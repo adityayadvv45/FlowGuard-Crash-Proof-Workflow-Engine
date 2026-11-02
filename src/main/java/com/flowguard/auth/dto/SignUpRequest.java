@@ -22,3 +22,4 @@ public record SignUpRequest(
 
         String role
 ) {}
+

@@ -12,3 +12,4 @@ public record UserAccountResponse(
         OffsetDateTime createdAt,
         OffsetDateTime lastLoginAt
 ) {}
+

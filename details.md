@@ -39,11 +39,13 @@ FlowGuard solves these problems by modeling workflow and step lifecycles as a du
 13. **Global Audit Log Endpoint:** `GET /api/events` provides paginated event audit history with filtering by event type and workflow execution ID.
 14. **Automated Test Coverage (Source Level):** Testcontainers PostgreSQL integration test suite (`WorkflowEnginePostgresIntegrationTest`), anomaly unit tests (`AnomalyDetectionServiceUnitTest`), and worker pool saturation tests (`WorkerQueueSaturationUnitTest`).
 15. **Premium Linear/Stripe-Inspired Dashboard:** Modular 8-page React architecture (`Overview`, `Workflows`, `Executions`, `ExecutionDetail`, `Statistical Analytics`, `Event History`, `System Health`, `Engine Settings`) with pure SVG trend charts, live status pills, and simulation playground.
+16. **E-Commerce Order Processing Domain (Phase 1):** Realistic e-commerce domain in `com.flowguard.ecommerce` powered by Flyway `V4__ecommerce_domain.sql` (`products`, `inventory`, `orders`, `order_items`, `payments`, `shipments`). Enforces authoritative server pricing, atomic conditional inventory updates (`WHERE available_quantity >= :qty`), 6-step durable saga fulfillment, automatic compensating rollbacks on failure/cancellation, and strict tenant ownership isolation.
 
 ### 1.4 Features Planned or Documented vs. Not Implemented in Code
 | Documented / Desired Feature | Actual Implementation Status | Findings from Code Inspection |
 |---|---|---|
 | **Multi-User Auth & Account Management** | **IMPLEMENTED** | Implemented in `com.flowguard.auth` with Flyway migration `V3__user_accounts.sql`, PostgreSQL persistence (`user_accounts`, `auth_tokens`), OWASP PBKDF2 with HMAC-SHA256 password hashing, and REST endpoints (`/api/auth/signup`, `/login`, `/me`, `/account`, `/logout`). |
+| **E-Commerce Order Processing Domain (Phase 1)** | **IMPLEMENTED** | Implemented in `com.flowguard.ecommerce` with Flyway migration `V4__ecommerce_domain.sql` (`products`, `inventory`, `orders`, `order_items`, `payments`, `shipments`). Features authoritative server pricing, atomic conditional inventory updates, 6-step durable saga fulfillment, compensating rollbacks on failure/cancellation, and strict tenant ownership isolation. |
 | **Interactive Recurring Scheduler** | **CLIENT-SIDE TIMER ONLY** | Implemented solely as a browser `setInterval` loop in React (`App.tsx`). If the browser tab is closed, scheduled execution stops. There is no backend cron/quartz scheduling table for user recurring jobs. |
 | **ML Predictive Diagnostics** | **IMPLEMENTED (BACKEND STATISTICAL DETECTOR)** | Implemented in `com.flowguard.analytics` (`AnomalyDetectionService`, `BaselineCalculationService`, `FeatureExtractionService`, `ExecutionRiskAnalyzer`). Evaluates live PostgreSQL runtime metrics, computes dynamic population baselines (Welford variance, IQR), and returns multivariate anomaly scores, reason codes, and deterministic retry eligibility via `/api/analytics/*`. |
 | **Observability & Metrics** | **IMPLEMENTED** | Implemented via `FlowGuardMetricsService` and Micrometer registering execution counters, step failure rates, retry/recovery counts, worker queue gauges, and SLF4J MDC logging in `WorkflowEngine`. |
@@ -549,6 +551,116 @@ src/main/java/com/flowguard/
 | `created_at` | `TIMESTAMPTZ` | NO | `CURRENT_TIMESTAMP` | Record creation timestamp |
 
 - **Unique Constraint:** `CONSTRAINT uk_idempotency_key UNIQUE (idempotency_key)`
+
+#### 6. Table `user_accounts` (`UserAccount.java`)
+| Column Name | Data Type | Nullable | Default | Constraints / Description |
+|---|---|---|---|---|
+| `id` | `UUID` | NO | None | Primary Key |
+| `username` | `VARCHAR(100)` | NO | None | Unique login username |
+| `email` | `VARCHAR(255)` | NO | None | Unique email address |
+| `password_hash` | `VARCHAR(255)` | NO | None | Salted PBKDF2 with HMAC-SHA256 password hash |
+| `full_name` | `VARCHAR(255)` | NO | None | Display name of user |
+| `role` | `VARCHAR(64)` | NO | `ENGINEER` | Access role (`ENGINEER`, `ADMIN`) |
+| `created_at` | `TIMESTAMPTZ` | NO | `CURRENT_TIMESTAMP` | Account creation timestamp |
+| `updated_at` | `TIMESTAMPTZ` | NO | `CURRENT_TIMESTAMP` | Last updated timestamp |
+| `last_login_at` | `TIMESTAMPTZ` | YES | None | Last authentication timestamp |
+
+#### 7. Table `auth_tokens` (`AuthToken.java`)
+| Column Name | Data Type | Nullable | Default | Constraints / Description |
+|---|---|---|---|---|
+| `token` | `VARCHAR(255)` | NO | None | Primary Key (Bearer session token) |
+| `user_id` | `UUID` | NO | None | Foreign Key referencing `user_accounts(id) ON DELETE CASCADE` |
+| `created_at` | `TIMESTAMPTZ` | NO | `CURRENT_TIMESTAMP` | Token issuance timestamp |
+| `expires_at` | `TIMESTAMPTZ` | NO | None | Session expiration timestamp (7-day default) |
+
+#### 8. Table `products` (`Product.java`)
+| Column Name | Data Type | Nullable | Default | Constraints / Description |
+|---|---|---|---|---|
+| `id` | `UUID` | NO | None | Primary Key |
+| `sku` | `VARCHAR(64)` | NO | None | Unique Stock Keeping Unit |
+| `name` | `VARCHAR(255)` | NO | None | Product title |
+| `description` | `TEXT` | YES | None | Product description |
+| `price` | `NUMERIC(12, 2)` | NO | None | Authoritative unit price (`CHECK price >= 0`) |
+| `currency` | `VARCHAR(3)` | NO | `'USD'` | ISO currency code |
+| `category` | `VARCHAR(64)` | NO | None | Category grouping (Computers, Audio, etc.) |
+| `active` | `BOOLEAN` | NO | `TRUE` | Whether product is available for ordering |
+| `created_at` | `TIMESTAMPTZ` | NO | `CURRENT_TIMESTAMP` | Catalog creation timestamp |
+| `updated_at` | `TIMESTAMPTZ` | NO | `CURRENT_TIMESTAMP` | Catalog update timestamp |
+
+#### 9. Table `inventory` (`Inventory.java`)
+| Column Name | Data Type | Nullable | Default | Constraints / Description |
+|---|---|---|---|---|
+| `id` | `UUID` | NO | None | Primary Key |
+| `product_id` | `UUID` | NO | None | Foreign Key referencing `products(id) ON DELETE CASCADE`, UNIQUE |
+| `available_quantity` | `INT` | NO | `0` | Unreserved stock (`CHECK >= 0`) |
+| `reserved_quantity` | `INT` | NO | `0` | In-flight checkout reservations (`CHECK >= 0`) |
+| `total_quantity` | `INT` | NO | `0` | Physical stock (`CHECK total = available + reserved`) |
+| `version` | `BIGINT` | NO | `0` | Optimistic concurrency version |
+| `updated_at` | `TIMESTAMPTZ` | NO | `CURRENT_TIMESTAMP` | Last stock level change |
+
+#### 10. Table `orders` (`Order.java`)
+| Column Name | Data Type | Nullable | Default | Constraints / Description |
+|---|---|---|---|---|
+| `id` | `UUID` | NO | None | Primary Key |
+| `order_reference` | `VARCHAR(64)` | NO | None | Unique human-readable reference (`ORD-YYYYMMDD-XXXXXXXX`) |
+| `user_id` | `UUID` | NO | None | Foreign Key referencing `user_accounts(id)` (tenant isolation) |
+| `workflow_execution_id` | `UUID` | YES | None | Foreign Key referencing `workflow_executions(id)` |
+| `status` | `VARCHAR(32)` | NO | `'PENDING'` | Status: `PENDING`, `VALIDATED`, `INVENTORY_RESERVED`, `PAID`, `CONFIRMED`, `SHIPPED`, `CANCELLED`, `FAILED` |
+| `subtotal` | `NUMERIC(12, 2)` | NO | `0.00` | Server-calculated items subtotal |
+| `tax` | `NUMERIC(12, 2)` | NO | `0.00` | Server-calculated 8% tax |
+| `shipping_fee` | `NUMERIC(12, 2)` | NO | `0.00` | Server-calculated shipping tier |
+| `total_amount` | `NUMERIC(12, 2)` | NO | `0.00` | Authoritative total amount charged |
+| `currency` | `VARCHAR(3)` | NO | `'USD'` | ISO currency code |
+| `idempotency_key` | `VARCHAR(255)` | YES | None | Unique idempotency token per user (`uk_orders_user_idempotency`) |
+| `shipping_address` | `TEXT` | NO | None | Physical delivery address |
+| `customer_notes` | `TEXT` | YES | None | Delivery instructions |
+| `created_at` | `TIMESTAMPTZ` | NO | `CURRENT_TIMESTAMP` | Order timestamp |
+| `updated_at` | `TIMESTAMPTZ` | NO | `CURRENT_TIMESTAMP` | Status change timestamp |
+| `cancelled_at` | `TIMESTAMPTZ` | YES | None | Cancellation timestamp |
+| `cancellation_reason` | `TEXT` | YES | None | Audit reason for order cancellation |
+
+#### 11. Table `order_items` (`OrderItem.java`)
+| Column Name | Data Type | Nullable | Default | Constraints / Description |
+|---|---|---|---|---|
+| `id` | `UUID` | NO | None | Primary Key |
+| `order_id` | `UUID` | NO | None | Foreign Key referencing `orders(id) ON DELETE CASCADE` |
+| `product_id` | `UUID` | NO | None | Foreign Key referencing `products(id) ON DELETE RESTRICT` |
+| `product_sku` | `VARCHAR(64)` | NO | None | Snapshot SKU |
+| `product_name` | `VARCHAR(255)` | NO | None | Snapshot product name |
+| `unit_price` | `NUMERIC(12, 2)` | NO | None | Snapshot price at checkout |
+| `quantity` | `INT` | NO | None | Quantity ordered (`CHECK quantity > 0`) |
+| `total_price` | `NUMERIC(12, 2)` | NO | None | `unit_price * quantity` |
+| `created_at` | `TIMESTAMPTZ` | NO | `CURRENT_TIMESTAMP` | Record creation timestamp |
+
+#### 12. Table `payments` (`Payment.java`)
+| Column Name | Data Type | Nullable | Default | Constraints / Description |
+|---|---|---|---|---|
+| `id` | `UUID` | NO | None | Primary Key |
+| `order_id` | `UUID` | NO | None | Foreign Key referencing `orders(id) ON DELETE CASCADE` |
+| `payment_reference` | `VARCHAR(64)` | NO | None | Unique payment reference (`PAY-ORD-...`) |
+| `external_transaction_id` | `VARCHAR(128)` | YES | None | Downstream gateway settlement transaction ID |
+| `idempotency_key` | `VARCHAR(255)` | YES | None | Gateway payment deduplication token |
+| `amount` | `NUMERIC(12, 2)` | NO | None | Amount charged |
+| `currency` | `VARCHAR(3)` | NO | `'USD'` | ISO currency code |
+| `status` | `VARCHAR(32)` | NO | `'INITIATED'` | Enum: `INITIATED`, `AUTHORIZED`, `SETTLED`, `FAILED`, `REFUNDED` |
+| `payment_method` | `VARCHAR(64)` | NO | `'SIMULATED_GATEWAY'` | Payment adapter source |
+| `failure_reason` | `TEXT` | YES | None | Gateway decline explanation |
+| `created_at` | `TIMESTAMPTZ` | NO | `CURRENT_TIMESTAMP` | Initiation timestamp |
+| `settled_at` | `TIMESTAMPTZ` | YES | None | Gateway settlement timestamp |
+
+#### 13. Table `shipments` (`Shipment.java`)
+| Column Name | Data Type | Nullable | Default | Constraints / Description |
+|---|---|---|---|---|
+| `id` | `UUID` | NO | None | Primary Key |
+| `order_id` | `UUID` | NO | None | Foreign Key referencing `orders(id) ON DELETE CASCADE` |
+| `shipment_reference` | `VARCHAR(64)` | NO | None | Unique carrier reference (`SHIP-ORD-...`) |
+| `tracking_number` | `VARCHAR(128)` | YES | None | Logistics tracking number |
+| `carrier` | `VARCHAR(64)` | NO | `'SIMULATED_CARRIER'` | Carrier name (FedEx, UPS, etc.) |
+| `status` | `VARCHAR(32)` | NO | `'PENDING'` | Enum: `PENDING`, `PREPARED`, `DISPATCHED`, `DELIVERED`, `CANCELLED` |
+| `shipping_address` | `TEXT` | NO | None | Shipping address destination |
+| `estimated_delivery_at` | `TIMESTAMPTZ` | YES | None | Carrier delivery estimate |
+| `created_at` | `TIMESTAMPTZ` | NO | `CURRENT_TIMESTAMP` | Shipment creation timestamp |
+| `updated_at` | `TIMESTAMPTZ` | NO | `CURRENT_TIMESTAMP` | Last status update timestamp |
 
 ### 5.4 Database Indexes
 The following indexes are explicitly created in `V1__init_schema.sql`:
