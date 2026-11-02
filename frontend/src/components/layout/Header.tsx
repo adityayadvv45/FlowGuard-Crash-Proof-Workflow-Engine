@@ -1,6 +1,6 @@
 import React from 'react';
-import { RefreshCw, Plus, Search, ChevronRight } from 'lucide-react';
-import { TabType } from '../../types';
+import { RefreshCw, Plus, Search, ChevronRight, User, LogIn } from 'lucide-react';
+import { TabType, UserAccount } from '../../types';
 
 interface HeaderProps {
   currentTab: TabType;
@@ -11,6 +11,8 @@ interface HeaderProps {
   isRefreshing: boolean;
   searchQuery: string;
   onSearchChange: (q: string) => void;
+  currentUser: UserAccount | null;
+  onOpenAuth: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -22,6 +24,8 @@ export const Header: React.FC<HeaderProps> = ({
   isRefreshing,
   searchQuery,
   onSearchChange,
+  currentUser,
+  onOpenAuth,
 }) => {
   const getTabTitle = (tab: TabType) => {
     switch (tab) {
@@ -99,13 +103,13 @@ export const Header: React.FC<HeaderProps> = ({
             border: '1px solid #30363d',
             borderRadius: '6px',
             padding: '5px 10px',
-            width: '220px',
+            width: '200px',
           }}
         >
           <Search size={14} style={{ color: '#8b949e', marginRight: '8px' }} />
           <input
             type="text"
-            placeholder="Search executions, IDs..."
+            placeholder="Search executions..."
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             style={{
@@ -182,6 +186,68 @@ export const Header: React.FC<HeaderProps> = ({
           <Plus size={14} strokeWidth={2.4} />
           <span>New Order</span>
         </button>
+
+        {/* User Profile Pill / Account Details CTA */}
+        {currentUser ? (
+          <button
+            onClick={onOpenAuth}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              backgroundColor: '#161b22',
+              border: '1px solid #30363d',
+              borderRadius: '6px',
+              padding: '4px 10px',
+              cursor: 'pointer',
+              color: '#f0f6fc',
+              transition: 'border-color 0.15s ease',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#38bdf8')}
+            onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#30363d')}
+            title="Account Details & Profile"
+          >
+            <div
+              style={{
+                width: '24px',
+                height: '24px',
+                borderRadius: '50%',
+                background: 'linear-gradient(135deg, #0284c7, #2563eb)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 700,
+                fontSize: '0.70rem',
+                color: '#ffffff',
+              }}
+            >
+              {currentUser.fullName ? currentUser.fullName.charAt(0).toUpperCase() : 'U'}
+            </div>
+            <span style={{ fontSize: '0.76rem', fontWeight: 600, maxWidth: '110px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {currentUser.fullName.split(' ')[0]}
+            </span>
+          </button>
+        ) : (
+          <button
+            onClick={onOpenAuth}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              backgroundColor: '#161b22',
+              border: '1px solid #30363d',
+              borderRadius: '6px',
+              padding: '6px 12px',
+              color: '#38bdf8',
+              fontSize: '0.78rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            <LogIn size={13} />
+            <span>Sign In</span>
+          </button>
+        )}
       </div>
     </header>
   );

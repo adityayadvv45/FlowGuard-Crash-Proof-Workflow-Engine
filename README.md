@@ -260,10 +260,15 @@ The presence of a dependency does not imply every test or integration path has b
 
 ## API Reference
 
-The following endpoints describe the implemented workflow, analytics, telemetry, and audit interfaces.
+The following endpoints describe the implemented authentication, workflow, analytics, telemetry, and audit interfaces.
 
 | Method | Endpoint | Purpose |
 |---|---|---|
+| `POST` | `/api/auth/signup` | Register a new user account with salted PBKDF2 password hashing. |
+| `POST` | `/api/auth/login` | Authenticate user credentials and return a session token. |
+| `GET` | `/api/auth/me` | Fetch active user profile from session token. |
+| `PUT` | `/api/auth/account` | Update account details (name, role, password). |
+| `POST` | `/api/auth/logout` | Invalidate and purge active session token. |
 | `GET` | `/api/workflows` | List all registered workflow definitions. |
 | `POST` | `/api/workflows/{id}/executions` | Start a new workflow execution (supports `Idempotency-Key` header and failure simulation). |
 | `GET` | `/api/executions` | List executions with pagination and filtering (`status`, `search`, `startDate`, `endDate`). |

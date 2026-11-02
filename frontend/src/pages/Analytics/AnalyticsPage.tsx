@@ -412,3 +412,4 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ onSelectExecution 
     </div>
   );
 };
+

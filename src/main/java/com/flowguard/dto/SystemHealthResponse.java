@@ -19,3 +19,4 @@ public record SystemHealthResponse(
         long heapMaxMb,
         OffsetDateTime timestamp
 ) {}
+

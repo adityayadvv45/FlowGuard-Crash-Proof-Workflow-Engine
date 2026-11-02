@@ -577,3 +577,4 @@ export const ExecutionDetailPage: React.FC<ExecutionDetailPageProps> = ({
     </div>
   );
 };
+

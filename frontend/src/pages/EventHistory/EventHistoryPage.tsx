@@ -312,3 +312,4 @@ export const EventHistoryPage: React.FC<EventHistoryPageProps> = ({
     </div>
   );
 };
+

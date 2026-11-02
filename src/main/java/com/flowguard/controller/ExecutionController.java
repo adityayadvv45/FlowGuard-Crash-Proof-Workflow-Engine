@@ -32,8 +32,7 @@ public class ExecutionController {
     public ExecutionController(
             WorkflowExecutionService executionService,
             FailureSimulationService failureSimulationService,
-            AnomalyDetectionService anomalyDetectionService
-    ) {
+            AnomalyDetectionService anomalyDetectionService) {
         this.executionService = executionService;
         this.failureSimulationService = failureSimulationService;
         this.anomalyDetectionService = anomalyDetectionService;
@@ -47,8 +46,7 @@ public class ExecutionController {
             @RequestParam(required = false) java.time.OffsetDateTime endDate,
             @RequestParam(required = false) String search,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size
-    ) {
+            @RequestParam(defaultValue = "20") int size) {
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         return ResponseEntity.ok(executionService.listExecutions(status, startDate, endDate, search, pageable));
     }
@@ -93,12 +91,11 @@ public class ExecutionController {
     @Operation(summary = "Inject a controlled failure or crash for demonstration purposes")
     public ResponseEntity<Map<String, String>> simulateFailure(
             @PathVariable UUID id,
-            @Valid @RequestBody SimulateFailureRequest request
-    ) {
+            @Valid @RequestBody SimulateFailureRequest request) {
         failureSimulationService.registerRule(id, request.stepKey(), request.mode());
         return ResponseEntity.ok(Map.of(
-                "message", "Failure simulation registered for execution " + id + " on step '" + request.stepKey() + "' with mode " + request.mode()
-        ));
+                "message", "Failure simulation registered for execution " + id + " on step '" + request.stepKey()
+                        + "' with mode " + request.mode()));
     }
 
     @DeleteMapping("/{id}")

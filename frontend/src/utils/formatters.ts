@@ -122,3 +122,4 @@ export function getSeverityStyle(severity: string) {
       return { bg: 'rgba(16, 185, 129, 0.15)', text: '#34d399', border: '#10b981' };
   }
 }
+

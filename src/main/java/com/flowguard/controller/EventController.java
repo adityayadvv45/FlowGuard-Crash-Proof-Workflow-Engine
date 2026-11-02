@@ -40,3 +40,4 @@ public class EventController {
         return ResponseEntity.ok(executionService.getGlobalEvents(workflowExecutionId, eventType, pageable));
     }
 }
+

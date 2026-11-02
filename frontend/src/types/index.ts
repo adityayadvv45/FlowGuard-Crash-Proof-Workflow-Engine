@@ -195,3 +195,44 @@ export interface EventFilters {
   eventType?: EventType | 'ALL';
   executionId?: string;
 }
+
+export interface UserAccount {
+  id: string;
+  username: string;
+  email: string;
+  fullName: string;
+  role: string;
+  createdAt: string;
+  lastLoginAt: string | null;
+}
+
+export interface AuthResponse {
+  token: string;
+  id: string;
+  username: string;
+  email: string;
+  fullName: string;
+  role: string;
+  createdAt: string;
+  lastLoginAt: string | null;
+}
+
+export interface SignUpRequest {
+  username: string;
+  email: string;
+  password: string;
+  fullName: string;
+  role?: string;
+}
+
+export interface LoginRequest {
+  emailOrUsername: string;
+  password: string;
+}
+
+export interface UpdateAccountRequest {
+  fullName?: string;
+  role?: string;
+  currentPassword?: string;
+  newPassword?: string;
+}

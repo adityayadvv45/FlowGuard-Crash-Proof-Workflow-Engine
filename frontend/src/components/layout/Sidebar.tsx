@@ -9,19 +9,26 @@ import {
   Sliders,
   ShieldCheck,
   Server,
+  User,
+  LogIn,
+  ChevronRight,
 } from 'lucide-react';
-import { TabType, SystemHealthResponse } from '../../types';
+import { TabType, SystemHealthResponse, UserAccount } from '../../types';
 
 interface SidebarProps {
   currentTab: TabType;
   onTabChange: (tab: TabType) => void;
   systemHealth: SystemHealthResponse | null;
+  currentUser: UserAccount | null;
+  onOpenAuth: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
   currentTab,
   onTabChange,
   systemHealth,
+  currentUser,
+  onOpenAuth,
 }) => {
   const navItems: { id: TabType; label: string; icon: React.ElementType; badge?: string }[] = [
     { id: 'overview', label: 'Overview', icon: Activity },
@@ -179,20 +186,98 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </nav>
       </div>
 
-      {/* Bottom Status / Developer pill */}
+      {/* Bottom User Profile & Status */}
       <div
         style={{
-          padding: '14px 14px',
+          padding: '12px 14px',
           borderTop: '1px solid #161b22',
           backgroundColor: 'rgba(255, 255, 255, 0.01)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '10px',
         }}
       >
+        {/* User Account Pill */}
+        {currentUser ? (
+          <button
+            onClick={onOpenAuth}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '8px 10px',
+              borderRadius: '7px',
+              backgroundColor: '#161b22',
+              border: '1px solid #21262d',
+              color: '#f0f6fc',
+              cursor: 'pointer',
+              textAlign: 'left',
+              width: '100%',
+              transition: 'border-color 0.15s ease',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#38bdf8')}
+            onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#21262d')}
+            title="Click to view Account Details"
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+              <div
+                style={{
+                  width: '26px',
+                  height: '26px',
+                  borderRadius: '50%',
+                  background: 'linear-gradient(135deg, #0284c7, #2563eb)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 700,
+                  fontSize: '0.74rem',
+                  color: '#ffffff',
+                  flexShrink: 0,
+                }}
+              >
+                {currentUser.fullName ? currentUser.fullName.charAt(0).toUpperCase() : 'U'}
+              </div>
+              <div style={{ overflow: 'hidden' }}>
+                <div style={{ fontSize: '0.76rem', fontWeight: 600, color: '#f0f6fc', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                  {currentUser.fullName}
+                </div>
+                <div style={{ fontSize: '0.66rem', color: '#8b949e', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                  {currentUser.role}
+                </div>
+              </div>
+            </div>
+            <ChevronRight size={13} style={{ color: '#8b949e', flexShrink: 0 }} />
+          </button>
+        ) : (
+          <button
+            onClick={onOpenAuth}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              padding: '8px 12px',
+              borderRadius: '6px',
+              backgroundColor: 'rgba(56, 189, 248, 0.1)',
+              border: '1px solid rgba(56, 189, 248, 0.3)',
+              color: '#38bdf8',
+              fontSize: '0.74rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              width: '100%',
+            }}
+          >
+            <LogIn size={13} />
+            <span>Sign In / Register</span>
+          </button>
+        )}
+
+        {/* Node & Database Status */}
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            marginBottom: '10px',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -208,13 +293,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     : '0 0 8px #f59e0b',
               }}
             />
-            <span style={{ fontSize: '0.72rem', color: '#c9d1d9', fontWeight: 500 }}>
+            <span style={{ fontSize: '0.70rem', color: '#c9d1d9', fontWeight: 500 }}>
               {systemHealth?.workerId || 'flowguard-node-1'}
             </span>
           </div>
           <span
             style={{
-              fontSize: '0.68rem',
+              fontSize: '0.66rem',
               color: '#6e7681',
               fontFamily: 'monospace',
             }}
@@ -228,23 +313,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
-            padding: '7px 9px',
-            borderRadius: '6px',
+            padding: '6px 8px',
+            borderRadius: '5px',
             backgroundColor: '#161b22',
             border: '1px solid #21262d',
           }}
         >
-          <Server size={14} style={{ color: '#8b949e' }} />
+          <Server size={13} style={{ color: '#8b949e' }} />
           <div style={{ overflow: 'hidden' }}>
-            <div style={{ fontSize: '0.70rem', color: '#8b949e', whiteSpace: 'nowrap' }}>
-              Database Status
+            <div style={{ fontSize: '0.66rem', color: '#8b949e', whiteSpace: 'nowrap' }}>
+              Database
             </div>
             <div
               style={{
-                fontSize: '0.72rem',
+                fontSize: '0.70rem',
                 color: systemHealth?.databaseStatus === 'CONNECTED' ? '#34d399' : '#f87171',
                 fontWeight: 600,
-                textTransform: 'capitalize',
               }}
             >
               {systemHealth?.databaseStatus || 'PostgreSQL OK'}

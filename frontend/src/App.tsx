@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   WorkflowDefinition,
   ExecutionResponse,
@@ -6,6 +6,7 @@ import {
   SystemHealthResponse,
   TabType,
   WorkflowStatus,
+  UserAccount,
 } from './types';
 import * as api from './services/api';
 import { Sidebar } from './components/layout/Sidebar';
@@ -20,10 +21,28 @@ import { SystemHealthPage } from './pages/SystemHealth/SystemHealthPage';
 import { SettingsPage } from './pages/Settings/SettingsPage';
 import { CreateOrderModal } from './components/CreateOrderModal';
 import { ModalJsonViewer } from './components/ModalJsonViewer';
+import { AuthModal } from './components/AuthModal';
+
+const DEFAULT_DEV_USER: UserAccount = {
+  id: 'b0000000-0000-0000-0000-000000000001',
+  username: 'aditya',
+  email: 'aditya@flowlab.dev',
+  fullName: 'Aditya Yadav',
+  role: 'Lead Backend Engineer',
+  createdAt: '2026-10-01T00:00:00Z',
+  lastLoginAt: null,
+};
 
 export const App: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<TabType>('overview');
   const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(null);
+
+  // Authentication & Active User
+  const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
+    const saved = localStorage.getItem('flowguard_user');
+    return saved ? JSON.parse(saved) : DEFAULT_DEV_USER;
+  });
+  const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
 
   // Core Data
   const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
@@ -48,6 +67,33 @@ export const App: React.FC = () => {
     setToast(msg);
     setTimeout(() => setToast(null), 4000);
   };
+
+  // Sync user changes to localStorage
+  const handleUserChange = (user: UserAccount | null) => {
+    setCurrentUser(user);
+    if (user) {
+      localStorage.setItem('flowguard_user', JSON.stringify(user));
+      showToast(`Logged in as ${user.fullName} (${user.role})`);
+    } else {
+      localStorage.removeItem('flowguard_user');
+      showToast('Signed out of FlowGuard');
+    }
+  };
+
+  // Check and verify user session on mount
+  useEffect(() => {
+    const token = api.getAuthToken();
+    if (token) {
+      api.fetchCurrentUser()
+        .then((user) => {
+          setCurrentUser(user);
+          localStorage.setItem('flowguard_user', JSON.stringify(user));
+        })
+        .catch(() => {
+          // If token verification fails, retain existing state or default
+        });
+    }
+  }, []);
 
   // Fetch initial/periodic data
   const loadData = useCallback(async (silent = false) => {
@@ -102,7 +148,7 @@ export const App: React.FC = () => {
         inputData: {
           orderId: data.orderId,
           amount: data.amount,
-          customerId: data.customerId,
+          customerId: data.customerId || (currentUser ? currentUser.fullName : 'Aditya Kumar'),
           items: data.items,
         },
         idempotencyKey: data.idempotencyKey,
@@ -200,6 +246,8 @@ export const App: React.FC = () => {
           setCurrentTab(tab);
         }}
         systemHealth={systemHealth}
+        currentUser={currentUser}
+        onOpenAuth={() => setShowAuthModal(true)}
       />
 
       {/* Main Content Area */}
@@ -226,6 +274,8 @@ export const App: React.FC = () => {
             setSearchQuery(q);
             setPage(0);
           }}
+          currentUser={currentUser}
+          onOpenAuth={() => setShowAuthModal(true)}
         />
 
         {/* Scrollable Page Body */}
@@ -311,7 +361,12 @@ export const App: React.FC = () => {
                 />
               )}
 
-              {currentTab === 'settings' && <SettingsPage />}
+              {currentTab === 'settings' && (
+                <SettingsPage
+                  currentUser={currentUser}
+                  onOpenAuth={() => setShowAuthModal(true)}
+                />
+              )}
             </>
           )}
         </main>
@@ -323,6 +378,7 @@ export const App: React.FC = () => {
         onClose={() => setShowCreateModal(false)}
         onSubmit={handleCreateOrderSubmit}
         isLoading={isSubmittingOrder}
+        currentCustomerName={currentUser ? currentUser.fullName : 'Aditya Kumar'}
       />
 
       {/* JSON Viewer Modal */}
@@ -333,6 +389,14 @@ export const App: React.FC = () => {
           onClose={() => setJsonModal(null)}
         />
       )}
+
+      {/* Authentication & Account Details Modal */}
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        currentUser={currentUser}
+        onUserChange={handleUserChange}
+      />
     </div>
   );
 };
