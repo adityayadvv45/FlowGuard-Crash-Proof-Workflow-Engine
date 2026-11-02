@@ -40,14 +40,17 @@ public class ExecutionController {
     }
 
     @GetMapping
-    @Operation(summary = "List workflow executions with pagination and optional status filter")
+    @Operation(summary = "List workflow executions with pagination, search, status, and date range filters")
     public ResponseEntity<Page<ExecutionResponse>> listExecutions(
             @RequestParam(required = false) WorkflowStatus status,
+            @RequestParam(required = false) java.time.OffsetDateTime startDate,
+            @RequestParam(required = false) java.time.OffsetDateTime endDate,
+            @RequestParam(required = false) String search,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size
     ) {
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
-        return ResponseEntity.ok(executionService.listExecutions(status, pageable));
+        return ResponseEntity.ok(executionService.listExecutions(status, startDate, endDate, search, pageable));
     }
 
     @GetMapping("/stats")

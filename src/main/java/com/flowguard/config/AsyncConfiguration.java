@@ -8,8 +8,6 @@ import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
-import java.util.concurrent.Executor;
-
 @Configuration
 @EnableAsync
 @EnableScheduling
@@ -18,12 +16,14 @@ public class AsyncConfiguration {
     private static final Logger log = LoggerFactory.getLogger(AsyncConfiguration.class);
 
     @Bean(name = "workflowWorkerExecutor")
-    public Executor workflowWorkerExecutor() {
+    public ThreadPoolTaskExecutor workflowWorkerExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(4);
         executor.setMaxPoolSize(16);
         executor.setQueueCapacity(100);
         executor.setThreadNamePrefix("flowguard-worker-");
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
 
         // Do not use CallerRunsPolicy: executing synchronously on HTTP servlet threads or @Scheduled
         // recovery timer threads violates non-blocking API contracts and blocks recovery sweeps.
@@ -31,7 +31,8 @@ public class AsyncConfiguration {
         // prior to worker submission. If the queue saturates, the task is logged and deferred to the
         // database; RecoveryService automatically dispatches pending unstarted executions on its next sweep.
         executor.setRejectedExecutionHandler((runnable, poolExecutor) -> {
-            log.warn("[WORKER_POOL] Worker queue capacity (100) reached. Worker dispatch deferred to durable recovery sweep.");
+            log.warn("[WORKER_POOL] Worker queue capacity (100) reached. Worker dispatch deferred to durable recovery sweep. ActiveCount={}, QueueSize={}",
+                    poolExecutor.getActiveCount(), poolExecutor.getQueue().size());
         });
 
         executor.initialize();

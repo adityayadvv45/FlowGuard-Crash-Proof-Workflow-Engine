@@ -150,18 +150,53 @@ public class WorkflowExecutionService {
     }
 
     public Page<ExecutionResponse> listExecutions(WorkflowStatus status, Pageable pageable) {
-        Page<WorkflowExecution> page;
-        if (status != null) {
-            page = executionRepository.findByStatus(status, pageable);
-        } else {
-            page = executionRepository.findAll(pageable);
-        }
+        return listExecutions(status, null, null, null, pageable);
+    }
+
+    public Page<ExecutionResponse> listExecutions(
+            WorkflowStatus status,
+            OffsetDateTime startDate,
+            OffsetDateTime endDate,
+            String search,
+            Pageable pageable
+    ) {
+        Page<WorkflowExecution> page = executionRepository.findWithFilters(status, startDate, endDate, search, pageable);
+        List<UUID> execIds = page.getContent().stream().map(WorkflowExecution::getId).toList();
+        Map<UUID, List<StepExecution>> stepsByExecId = stepRepository.findByWorkflowExecutionIdIn(execIds)
+                .stream().collect(Collectors.groupingBy(StepExecution::getWorkflowExecutionId));
 
         return page.map(exec -> {
             WorkflowDefinition def = definitionService.getEntityById(exec.getWorkflowDefinitionId());
-            List<StepExecution> steps = stepRepository.findByWorkflowExecutionIdOrderByStepOrderAsc(exec.getId());
+            List<StepExecution> steps = stepsByExecId.getOrDefault(exec.getId(), Collections.emptyList());
             return mapToExecutionResponse(exec, def, steps);
         });
+    }
+
+    public Page<ExecutionEventResponse> getGlobalEvents(
+            UUID workflowExecutionId,
+            EventType eventType,
+            Pageable pageable
+    ) {
+        Page<ExecutionEvent> page;
+        if (workflowExecutionId != null && eventType != null) {
+            page = eventRepository.findByWorkflowExecutionIdAndEventTypeOrderByCreatedAtDesc(workflowExecutionId, eventType, pageable);
+        } else if (workflowExecutionId != null) {
+            page = eventRepository.findByWorkflowExecutionIdOrderByCreatedAtDesc(workflowExecutionId, pageable);
+        } else if (eventType != null) {
+            page = eventRepository.findByEventTypeOrderByCreatedAtDesc(eventType, pageable);
+        } else {
+            page = eventRepository.findAllByOrderByCreatedAtDesc(pageable);
+        }
+
+        return page.map(event -> new ExecutionEventResponse(
+                event.getId(),
+                event.getWorkflowExecutionId(),
+                event.getStepExecutionId(),
+                event.getEventType(),
+                event.getMessage(),
+                event.getDetailsJson(),
+                event.getCreatedAt()
+        ));
     }
 
     public List<ExecutionEventResponse> getExecutionEvents(UUID executionId) {

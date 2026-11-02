@@ -63,6 +63,14 @@ export interface ExecutionEventResponse {
   createdAt: string;
 }
 
+export interface PaginatedEventsResponse {
+  content: ExecutionEventResponse[];
+  totalElements: number;
+  totalPages: number;
+  size: number;
+  number: number;
+}
+
 export interface WorkflowStats {
   totalExecutions: number;
   runningExecutions: number;
@@ -147,4 +155,43 @@ export interface SimulationRequest {
   amount?: number;
   attemptCount?: number;
   errorType?: string;
+}
+
+export interface SystemHealthResponse {
+  status: string;
+  databaseStatus: string;
+  workerId: string;
+  activeWorkers: number;
+  workerPoolSize: number;
+  workerQueueSize: number;
+  workerQueueCapacity: number;
+  activeLeasesCount: number;
+  leaseDurationSeconds: number;
+  recoveryIntervalSeconds: number;
+  retryPollIntervalSeconds: number;
+  uptimeMillis: number;
+  heapUsedMb: number;
+  heapMaxMb: number;
+  timestamp: string;
+}
+
+export type TabType =
+  | 'overview'
+  | 'workflows'
+  | 'executions'
+  | 'analytics'
+  | 'events'
+  | 'health'
+  | 'settings';
+
+export interface ExecutionFilters {
+  status?: WorkflowStatus | 'ALL';
+  search?: string;
+  startDate?: string;
+  endDate?: string;
+}
+
+export interface EventFilters {
+  eventType?: EventType | 'ALL';
+  executionId?: string;
 }

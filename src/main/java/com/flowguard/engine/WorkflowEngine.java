@@ -11,6 +11,7 @@ import com.flowguard.enums.WorkflowStatus;
 import com.flowguard.exception.PermanentStepException;
 import com.flowguard.exception.SimulatedCrashException;
 import com.flowguard.exception.TransientStepException;
+import com.flowguard.metrics.FlowGuardMetricsService;
 import com.flowguard.repository.StepExecutionRepository;
 import com.flowguard.repository.WorkflowExecutionRepository;
 import com.flowguard.service.ExecutionEventRecorder;
@@ -18,11 +19,14 @@ import com.flowguard.service.FailureSimulationService;
 import com.flowguard.service.RetryService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.*;
 
@@ -40,6 +44,7 @@ public class WorkflowEngine {
     private final RetryService retryService;
     private final FailureSimulationService failureSimulationService;
     private final ObjectMapper objectMapper;
+    private final FlowGuardMetricsService metricsService;
 
     public WorkflowEngine(
             @Value("${flowguard.engine.worker-id:flowguard-worker-1}") String workerId,
@@ -50,7 +55,8 @@ public class WorkflowEngine {
             ExecutionEventRecorder eventRecorder,
             RetryService retryService,
             FailureSimulationService failureSimulationService,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            @Autowired(required = false) FlowGuardMetricsService metricsService
     ) {
         this.workerId = workerId;
         this.leaseDurationSeconds = leaseDurationSeconds;
@@ -61,102 +67,124 @@ public class WorkflowEngine {
         this.retryService = retryService;
         this.failureSimulationService = failureSimulationService;
         this.objectMapper = objectMapper;
+        this.metricsService = metricsService;
     }
 
     public void processWorkflow(UUID workflowExecutionId) {
-        log.info("[ENGINE] Starting processing for workflowExecutionId={}", workflowExecutionId);
+        String correlationId = UUID.randomUUID().toString().substring(0, 8);
+        MDC.put("workflowExecutionId", String.valueOf(workflowExecutionId));
+        MDC.put("correlationId", correlationId);
+        MDC.put("workerId", workerId);
 
-        // Verify execution exists and is runnable
-        WorkflowExecution execution = executionRepository.findById(workflowExecutionId).orElse(null);
-        if (execution == null || execution.getStatus().isTerminal()) {
-            log.info("[ENGINE] Execution {} is absent or already terminal ({})", workflowExecutionId, execution != null ? execution.getStatus() : "null");
-            return;
-        }
+        try {
+            log.info("[ENGINE] Starting processing for workflowExecutionId={}", workflowExecutionId);
 
-        if (execution.getStatus() == WorkflowStatus.PENDING) {
-            markWorkflowRunning(execution);
-        }
-
-        // Sequential loop through steps
-        List<StepExecution> steps = stepRepository.findByWorkflowExecutionIdOrderByStepOrderAsc(workflowExecutionId);
-        Map<String, Object> accumulatedOutputs = new HashMap<>();
-
-        // Populate already completed step outputs to preserve previous state
-        for (StepExecution step : steps) {
-            if (step.getStatus() == StepStatus.COMPLETED && step.getOutputJson() != null) {
-                accumulatedOutputs.putAll(parseJsonMap(step.getOutputJson()));
-            }
-        }
-
-        for (StepExecution step : steps) {
-            // Re-check workflow status in case of cancellation
-            WorkflowExecution currentExec = executionRepository.findById(workflowExecutionId).orElse(null);
-            if (currentExec != null && currentExec.getStatus() == WorkflowStatus.CANCELLED) {
-                log.info("[ENGINE] Workflow {} cancelled, stopping step processing", workflowExecutionId);
+            // Verify execution exists and is runnable
+            WorkflowExecution execution = executionRepository.findById(workflowExecutionId).orElse(null);
+            if (execution == null || execution.getStatus().isTerminal()) {
+                log.info("[ENGINE] Execution {} is absent or already terminal ({})", workflowExecutionId, execution != null ? execution.getStatus() : "null");
                 return;
             }
 
-            // If step is already completed, skip it (Preserve completed work!)
-            if (step.getStatus() == StepStatus.COMPLETED) {
-                log.info("[ENGINE] Step '{}' already COMPLETED, safely skipping", step.getStepName());
-                continue;
+            if (execution.getStatus() == WorkflowStatus.PENDING) {
+                markWorkflowRunning(execution);
             }
 
-            // If step is waiting for retry and time hasn't arrived, pause sequential execution
-            if (step.getStatus() == StepStatus.RETRY_WAIT) {
-                if (step.getNextRetryAt() != null && step.getNextRetryAt().isAfter(OffsetDateTime.now())) {
-                    log.info("[ENGINE] Step '{}' is in RETRY_WAIT until {}, halting sequential loop", step.getStepName(), step.getNextRetryAt());
-                    return;
+            // Sequential loop through steps
+            List<StepExecution> steps = stepRepository.findByWorkflowExecutionIdOrderByStepOrderAsc(workflowExecutionId);
+            Map<String, Object> accumulatedOutputs = new HashMap<>();
+
+            // Populate already completed step outputs to preserve previous state
+            for (StepExecution step : steps) {
+                if (step.getStatus() == StepStatus.COMPLETED && step.getOutputJson() != null) {
+                    accumulatedOutputs.putAll(parseJsonMap(step.getOutputJson()));
                 }
             }
 
-            // Attempt atomic claim
-            boolean claimed = claimStep(step.getId());
-            if (!claimed) {
-                log.warn("[ENGINE] Failed to claim step {} (may be claimed by another worker or in terminal state)", step.getId());
-                return;
-            }
+            for (StepExecution step : steps) {
+                MDC.put("stepKey", step.getStepKey());
+                MDC.put("stepOrder", String.valueOf(step.getStepOrder()));
+                MDC.put("attempt", String.valueOf(step.getAttemptCount()));
 
-            // Reload fresh step record after claim
-            StepExecution claimedStep = stepRepository.findById(step.getId()).orElseThrow();
-            eventRecorder.recordEvent(
-                    workflowExecutionId,
-                    claimedStep.getId(),
-                    EventType.STEP_STARTED,
-                    "Step '" + claimedStep.getStepName() + "' started by worker " + workerId + " (attempt " + claimedStep.getAttemptCount() + ")",
-                    null
-            );
+                // Re-check workflow status in case of cancellation
+                WorkflowExecution currentExec = executionRepository.findById(workflowExecutionId).orElse(null);
+                if (currentExec != null && currentExec.getStatus() == WorkflowStatus.CANCELLED) {
+                    log.info("[ENGINE] Workflow {} cancelled, stopping step processing", workflowExecutionId);
+                    return;
+                }
 
-            // Execute step business logic
-            StepResult result = executeStepLogic(claimedStep, execution.getInputJson(), accumulatedOutputs);
+                // If step is already completed, skip it (Preserve completed work!)
+                if (step.getStatus() == StepStatus.COMPLETED) {
+                    log.info("[ENGINE] Step '{}' already COMPLETED, safely skipping", step.getStepName());
+                    continue;
+                }
 
-            if (result == null) {
-                // Simulated crash occurred! Worker aborts abruptly to allow recovery demonstration
-                log.warn("[ENGINE] Simulated worker crash occurred on step {}. Exiting without state commit.", claimedStep.getStepKey());
+                // If step is waiting for retry and time hasn't arrived, pause sequential execution
+                if (step.getStatus() == StepStatus.RETRY_WAIT) {
+                    if (step.getNextRetryAt() != null && step.getNextRetryAt().isAfter(OffsetDateTime.now())) {
+                        log.info("[ENGINE] Step '{}' is in RETRY_WAIT until {}, halting sequential loop", step.getStepName(), step.getNextRetryAt());
+                        return;
+                    }
+                }
+
+                // Attempt atomic claim
+                boolean claimed = claimStep(step.getId());
+                if (!claimed) {
+                    log.warn("[ENGINE] Failed to claim step {} (may be claimed by another worker or in terminal state)", step.getId());
+                    return;
+                }
+
+                // Reload fresh step record after claim
+                StepExecution claimedStep = stepRepository.findById(step.getId()).orElseThrow();
                 eventRecorder.recordEvent(
                         workflowExecutionId,
                         claimedStep.getId(),
-                        EventType.EXECUTION_INTERRUPTED,
-                        "Worker interrupted during step '" + claimedStep.getStepName() + "'. Lease will expire at " + claimedStep.getWorkerLeaseUntil(),
+                        EventType.STEP_STARTED,
+                        "Step '" + claimedStep.getStepName() + "' started by worker " + workerId + " (attempt " + claimedStep.getAttemptCount() + ")",
                         null
                 );
-                return;
+
+                // Execute step business logic
+                long stepStart = System.currentTimeMillis();
+                StepResult result = executeStepLogic(claimedStep, execution.getInputJson(), accumulatedOutputs);
+                long stepDurationMs = System.currentTimeMillis() - stepStart;
+
+                if (result == null) {
+                    // Simulated crash occurred! Worker aborts abruptly to allow recovery demonstration
+                    log.warn("[ENGINE] Simulated worker crash occurred on step {}. Exiting without state commit.", claimedStep.getStepKey());
+                    eventRecorder.recordEvent(
+                            workflowExecutionId,
+                            claimedStep.getId(),
+                            EventType.EXECUTION_INTERRUPTED,
+                            "Worker interrupted during step '" + claimedStep.getStepName() + "'. Lease will expire at " + claimedStep.getWorkerLeaseUntil(),
+                            null
+                    );
+                    return;
+                }
+
+                if (result.success()) {
+                    accumulatedOutputs.putAll(result.outputData());
+                    commitStepSuccess(claimedStep.getId(), result.outputData());
+                    if (metricsService != null) {
+                        metricsService.recordStepCompleted(claimedStep.getStepKey(), stepDurationMs);
+                    }
+                } else {
+                    handleStepFailure(claimedStep, result);
+                    if (metricsService != null) {
+                        metricsService.recordStepFailed(claimedStep.getStepKey(), !result.retryable());
+                    }
+                    return; // Stop workflow progress on failure/retry
+                }
             }
 
-            if (result.success()) {
-                accumulatedOutputs.putAll(result.outputData());
-                commitStepSuccess(claimedStep.getId(), result.outputData());
-            } else {
-                handleStepFailure(claimedStep, result);
-                return; // Stop workflow progress on failure/retry
+            // Check if all steps are completed
+            List<StepExecution> finalSteps = stepRepository.findByWorkflowExecutionIdOrderByStepOrderAsc(workflowExecutionId);
+            boolean allComplete = finalSteps.stream().allMatch(s -> s.getStatus() == StepStatus.COMPLETED);
+            if (allComplete) {
+                completeWorkflow(workflowExecutionId, accumulatedOutputs);
             }
-        }
-
-        // Check if all steps are completed
-        List<StepExecution> finalSteps = stepRepository.findByWorkflowExecutionIdOrderByStepOrderAsc(workflowExecutionId);
-        boolean allComplete = finalSteps.stream().allMatch(s -> s.getStatus() == StepStatus.COMPLETED);
-        if (allComplete) {
-            completeWorkflow(workflowExecutionId, accumulatedOutputs);
+        } finally {
+            MDC.clear();
         }
     }
 
@@ -165,6 +193,9 @@ public class WorkflowEngine {
         execution.setStatus(WorkflowStatus.RUNNING);
         execution.setStartedAt(OffsetDateTime.now());
         executionRepository.save(execution);
+        if (metricsService != null) {
+            metricsService.recordExecutionStarted();
+        }
         eventRecorder.recordEvent(
                 execution.getId(),
                 null,
@@ -274,6 +305,10 @@ public class WorkflowEngine {
         execution.setErrorMessage("Failed at step '" + step.getStepName() + "': " + errorMessage);
         executionRepository.save(execution);
 
+        if (metricsService != null) {
+            metricsService.recordExecutionFailed();
+        }
+
         eventRecorder.recordEvent(
                 execution.getId(),
                 step.getId(),
@@ -287,10 +322,18 @@ public class WorkflowEngine {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void completeWorkflow(UUID workflowExecutionId, Map<String, Object> output) {
         WorkflowExecution execution = executionRepository.findById(workflowExecutionId).orElseThrow();
+        OffsetDateTime now = OffsetDateTime.now();
         execution.setStatus(WorkflowStatus.COMPLETED);
-        execution.setCompletedAt(OffsetDateTime.now());
+        execution.setCompletedAt(now);
         execution.setOutputJson(toJson(output));
         executionRepository.save(execution);
+
+        long durationMs = (execution.getStartedAt() != null)
+                ? Duration.between(execution.getStartedAt(), now).toMillis()
+                : 0L;
+        if (metricsService != null) {
+            metricsService.recordExecutionCompleted(durationMs);
+        }
 
         eventRecorder.recordEvent(
                 workflowExecutionId,

@@ -26,6 +26,7 @@ public class RetryService {
 
     private final StepExecutionRepository stepRepository;
     private final ExecutionEventRecorder eventRecorder;
+    private final com.flowguard.metrics.FlowGuardMetricsService metricsService;
 
     public RetryService(
             @Value("${flowguard.engine.retry.max-attempts:3}") int maxAttempts,
@@ -34,7 +35,8 @@ public class RetryService {
             @Value("${flowguard.engine.retry.max-delay-seconds:30}") long maxDelaySeconds,
             @Value("${flowguard.engine.retry.jitter-factor:0.2}") double jitterFactor,
             StepExecutionRepository stepRepository,
-            ExecutionEventRecorder eventRecorder
+            ExecutionEventRecorder eventRecorder,
+            @org.springframework.beans.factory.annotation.Autowired(required = false) com.flowguard.metrics.FlowGuardMetricsService metricsService
     ) {
         this.maxAttempts = maxAttempts;
         this.initialDelaySeconds = initialDelaySeconds;
@@ -43,6 +45,7 @@ public class RetryService {
         this.jitterFactor = jitterFactor;
         this.stepRepository = stepRepository;
         this.eventRecorder = eventRecorder;
+        this.metricsService = metricsService;
     }
 
     public boolean canRetry(int currentAttempt) {
@@ -88,6 +91,9 @@ public class RetryService {
                 "Retry scheduled for step '" + step.getStepName() + "' (attempt " + step.getAttemptCount() + "/" + maxAttempts + ") at " + nextRetry,
                 details
         );
+        if (metricsService != null) {
+            metricsService.recordRetryScheduled();
+        }
         log.info("[RETRY] Scheduled retry for stepId={} attempt={} nextRetry={}", step.getId(), step.getAttemptCount(), nextRetry);
     }
 }

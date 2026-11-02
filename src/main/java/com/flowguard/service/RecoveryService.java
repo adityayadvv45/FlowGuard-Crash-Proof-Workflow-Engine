@@ -33,19 +33,22 @@ public class RecoveryService {
     private final WorkflowEngine workflowEngine;
     private final ExecutionEventRecorder eventRecorder;
     private final Executor workerExecutor;
+    private final com.flowguard.metrics.FlowGuardMetricsService metricsService;
 
     public RecoveryService(
             StepExecutionRepository stepRepository,
             WorkflowExecutionRepository executionRepository,
             WorkflowEngine workflowEngine,
             ExecutionEventRecorder eventRecorder,
-            @Qualifier("workflowWorkerExecutor") Executor workerExecutor
+            @Qualifier("workflowWorkerExecutor") Executor workerExecutor,
+            @org.springframework.beans.factory.annotation.Autowired(required = false) com.flowguard.metrics.FlowGuardMetricsService metricsService
     ) {
         this.stepRepository = stepRepository;
         this.executionRepository = executionRepository;
         this.workflowEngine = workflowEngine;
         this.eventRecorder = eventRecorder;
         this.workerExecutor = workerExecutor;
+        this.metricsService = metricsService;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -92,6 +95,10 @@ public class RecoveryService {
                     "Crash recovery: Reclaimed expired worker lease for step '" + step.getStepName() + "'. Resuming safely without repeating completed steps.",
                     "{\"previousLeaseUntil\":\"" + step.getWorkerLeaseUntil() + "\"}"
             );
+
+            if (metricsService != null) {
+                metricsService.recordRecoveryPerformed();
+            }
 
             workflowsToResume.add(step.getWorkflowExecutionId());
         }

@@ -6,6 +6,9 @@ import {
   AnomalyReport,
   AnalyticsSummaryResponse,
   SimulationRequest,
+  SystemHealthResponse,
+  PaginatedEventsResponse,
+  ExecutionFilters,
 } from '../types';
 
 const BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL || '/api';
@@ -22,8 +25,29 @@ export async function fetchWorkflows(): Promise<WorkflowDefinition[]> {
   return res.json();
 }
 
-export async function fetchExecutions(page = 0, size = 20): Promise<{ content: ExecutionResponse[]; totalElements: number }> {
-  const res = await fetch(`${BASE_URL}/executions?page=${page}&size=${size}`);
+export async function fetchExecutions(
+  page = 0,
+  size = 20,
+  filters?: ExecutionFilters
+): Promise<{ content: ExecutionResponse[]; totalElements: number; totalPages: number }> {
+  const params = new URLSearchParams();
+  params.set('page', String(page));
+  params.set('size', String(size));
+
+  if (filters?.status && filters.status !== 'ALL') {
+    params.set('status', filters.status);
+  }
+  if (filters?.search && filters.search.trim()) {
+    params.set('search', filters.search.trim());
+  }
+  if (filters?.startDate) {
+    params.set('startDate', filters.startDate);
+  }
+  if (filters?.endDate) {
+    params.set('endDate', filters.endDate);
+  }
+
+  const res = await fetch(`${BASE_URL}/executions?${params.toString()}`);
   if (!res.ok) throw new Error('Failed to fetch executions');
   return res.json();
 }
@@ -37,6 +61,33 @@ export async function fetchExecution(id: string): Promise<ExecutionResponse> {
 export async function fetchEvents(executionId: string): Promise<ExecutionEventResponse[]> {
   const res = await fetch(`${BASE_URL}/executions/${executionId}/events`);
   if (!res.ok) throw new Error(`Failed to fetch events for execution: ${executionId}`);
+  return res.json();
+}
+
+export async function fetchGlobalEvents(
+  page = 0,
+  size = 20,
+  eventType?: string,
+  executionId?: string
+): Promise<PaginatedEventsResponse> {
+  const params = new URLSearchParams();
+  params.set('page', String(page));
+  params.set('size', String(size));
+  if (eventType && eventType !== 'ALL') {
+    params.set('eventType', eventType);
+  }
+  if (executionId && executionId.trim()) {
+    params.set('workflowExecutionId', executionId.trim());
+  }
+
+  const res = await fetch(`${BASE_URL}/events?${params.toString()}`);
+  if (!res.ok) throw new Error('Failed to fetch event audit history');
+  return res.json();
+}
+
+export async function fetchSystemHealth(): Promise<SystemHealthResponse> {
+  const res = await fetch(`${BASE_URL}/system/health`);
+  if (!res.ok) throw new Error('Failed to fetch system health status');
   return res.json();
 }
 
@@ -64,13 +115,13 @@ export async function startExecution(
       body: JSON.stringify(payload),
     });
   } catch (err: unknown) {
-    throw new Error('Cannot connect to backend on port 8080. Please start the backend using: .\\mvnw.cmd spring-boot:run');
+    throw new Error('Cannot connect to backend on port 8080. Please ensure the backend is running on http://localhost:8080');
   }
 
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({}));
     if (res.status === 500 && !errorData.message) {
-      throw new Error('Backend server is not running on http://localhost:8080. Please start the backend with: .\\mvnw.cmd spring-boot:run');
+      throw new Error('Internal Server Error. Please verify database connectivity.');
     }
     throw new Error(errorData.message || `Failed to start execution (${res.status})`);
   }

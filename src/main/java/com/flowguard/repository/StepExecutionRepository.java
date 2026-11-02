@@ -28,6 +28,11 @@ public interface StepExecutionRepository extends JpaRepository<StepExecution, UU
     @Query("SELECT s FROM StepExecution s WHERE s.status = 'RUNNING' AND s.workerLeaseUntil < :now")
     List<StepExecution> findExpiredLeases(@Param("now") OffsetDateTime now);
 
+    @Query("SELECT COUNT(s) FROM StepExecution s WHERE s.status = 'RUNNING' AND s.workerLeaseUntil >= :now")
+    long countActiveLeases(@Param("now") OffsetDateTime now);
+
+    long countByStatus(StepStatus status);
+
     @org.springframework.transaction.annotation.Transactional
     @Modifying
     @Query("""
@@ -40,7 +45,7 @@ public interface StepExecutionRepository extends JpaRepository<StepExecution, UU
             s.updatedAt = :now
         WHERE s.id = :id
           AND (s.status = com.flowguard.enums.StepStatus.PENDING 
-               OR s.status = com.flowguard.enums.StepStatus.RETRY_WAIT 
+               OR (s.status = com.flowguard.enums.StepStatus.RETRY_WAIT AND (s.nextRetryAt IS NULL OR s.nextRetryAt <= :now))
                OR (s.status = com.flowguard.enums.StepStatus.RUNNING AND s.workerLeaseUntil < :now))
     """)
     int claimStep(

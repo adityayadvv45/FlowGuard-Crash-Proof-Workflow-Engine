@@ -260,14 +260,24 @@ The presence of a dependency does not imply every test or integration path has b
 
 ## API Reference
 
-The following endpoints describe the implemented analytics interface. Confirm request formats and response DTOs against the source code before integrating external clients.
+The following endpoints describe the implemented workflow, analytics, telemetry, and audit interfaces.
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| `GET` | `/api/analytics/executions/{id}` | Analyze a specific execution. |
+| `GET` | `/api/workflows` | List all registered workflow definitions. |
+| `POST` | `/api/workflows/{id}/executions` | Start a new workflow execution (supports `Idempotency-Key` header and failure simulation). |
+| `GET` | `/api/executions` | List executions with pagination and filtering (`status`, `search`, `startDate`, `endDate`). |
+| `GET` | `/api/executions/{id}` | Retrieve deep execution state and step list. |
+| `POST` | `/api/executions/{id}/retry` | Manually re-trigger a failed workflow execution. |
+| `POST` | `/api/executions/{id}/cancel` | Cancel an in-flight workflow execution. |
+| `DELETE` | `/api/executions/{id}` | Delete execution record and associated step data. |
+| `GET` | `/api/executions/stats` | Aggregate execution counts by status. |
+| `GET` | `/api/events` | Paginated global audit log history with `eventType` and `workflowExecutionId` filters. |
+| `GET` | `/api/system/health` | Live system telemetry: DB status, worker thread pool & queue backlog, active leases, memory, uptime. |
+| `GET` | `/api/analytics/executions/{id}` | Analyze a specific execution against historical statistical baseline. |
 | `GET` | `/api/analytics/recent?limit=20` | Retrieve recent execution assessments. |
 | `GET` | `/api/analytics/summary` | Retrieve aggregate analytics and baseline information. |
-| `POST` | `/api/analytics/simulate` | Evaluate hypothetical inputs in memory. |
+| `POST` | `/api/analytics/simulate` | Evaluate hypothetical inputs in memory without writing to database. |
 | `GET` | `/api/executions/{id}/anomaly` | Convenience endpoint for execution anomaly analysis. |
 
 ### Example: Retrieve an execution assessment
@@ -544,6 +554,64 @@ FlowGuard is an engineering project, and some capabilities remain intentionally 
 - **Runtime verification:** Do not treat source-level implementation or documentation as proof that builds, tests, deployment, or recovery scenarios succeed.
 
 These limitations define useful next steps rather than hiding important engineering trade-offs.
+
+---
+
+## Observability & Metrics
+
+FlowGuard is instrumented with Micrometer and Spring Boot Actuator for production-grade telemetry.
+
+### Metrics Exposed (`/actuator/prometheus`)
+
+| Metric Name | Type | Description |
+|---|---|---|
+| `flowguard.executions.total` | Counter | Total workflow executions initiated (tagged by `workflow_name`). |
+| `flowguard.executions.completed` | Counter | Total successfully completed workflows. |
+| `flowguard.executions.failed` | Counter | Total terminally failed workflows. |
+| `flowguard.steps.completed` | Counter | Steps completed across all workflows (tagged by `step_key`). |
+| `flowguard.steps.failed` | Counter | Step failures encountered (tagged by `step_key`). |
+| `flowguard.retries.scheduled` | Counter | Retries scheduled via exponential backoff (tagged by `step_key`). |
+| `flowguard.recoveries.performed` | Counter | Interrupted steps recovered after worker lease expiration. |
+| `flowguard.worker.rejected` | Counter | Tasks rejected due to worker queue saturation. |
+| `flowguard.workflow.duration` | Timer | End-to-end execution latency distribution. |
+| `flowguard.step.duration` | Timer | Step-level latency distribution. |
+| `flowguard.worker.pool.size` | Gauge | Active worker thread pool capacity. |
+| `flowguard.worker.queue.size` | Gauge | Live worker task queue backlog count. |
+
+### Structured MDC Logging
+
+Worker threads log with SLF4J Mapped Diagnostic Context (MDC), populating:
+- `workflowExecutionId` — Global UUID of the workflow execution
+- `correlationId` — Cross-step correlation token
+- `workerId` — Unique node identity (e.g. `flowguard-worker-1`)
+- `stepKey` — Current step identifier (e.g. `PROCESS_PAYMENT`)
+- `stepOrder` — Integer pipeline index
+- `attempt` — Current retry attempt count
+
+All MDC keys are strictly purged via `MDC.clear()` in execution `finally` blocks to prevent thread-pool context leakage.
+
+---
+
+## Test Suites (Source Implemented)
+
+The following test suites are included in the repository source code:
+
+1. **PostgreSQL Testcontainers Integration Test (`WorkflowEnginePostgresIntegrationTest.java`)**:
+   - Launches a real PostgreSQL 16 container and applies Flyway migrations.
+   - **Atomic Concurrency Test:** Dispatches 10 parallel worker threads attempting to claim the exact same step simultaneously, asserting that exactly 1 worker succeeds.
+   - **Lease Expiration & Recovery Test:** Simulates a crashed worker holding an expired lease; verifies that `RecoveryService` reclaims and runs the step to completion.
+   - **Idempotency Guarantee Test:** Submits requests with identical idempotency keys, confirming deduplication and identical response IDs.
+   - **Non-blocking Retry Scheduling:** Asserts that failed steps enter `RETRY_WAIT` with a scheduled `nextRetryAt` timestamp.
+
+2. **Statistical Anomaly Detection Unit Test (`AnomalyDetectionServiceUnitTest.java`)**:
+   - Tests cold start behavior ($N < 5$ samples yields `INSUFFICIENT_DATA` without false alarms).
+   - Tests zero-variance and small-sample runtime conditions.
+   - Tests multivariate compound anomaly scoring and critical severity triggers.
+   - Tests deterministic error classification and retry policy recommendations.
+
+3. **Worker Queue Saturation Unit Test (`WorkerQueueSaturationUnitTest.java`)**:
+   - Tests graceful shutdown and thread pool configuration.
+   - Tests custom rejection handling when worker queue capacity is reached.
 
 ---
 
