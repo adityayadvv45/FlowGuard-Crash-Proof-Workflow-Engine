@@ -597,4 +597,3 @@ Potential next steps include:
 
 ---
 
-*FlowGuard is a portfolio engineering project focused on durable workflow execution, fault recovery, retry semantics, database coordination, and explainable execution analytics.*
