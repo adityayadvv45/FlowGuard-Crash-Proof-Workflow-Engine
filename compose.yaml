@@ -1,0 +1,62 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: flowguard-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-flowguard}
+      POSTGRES_USER: ${POSTGRES_USER:-flowguard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-flowguard_dev_secret}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-flowguard} -d ${POSTGRES_DB:-flowguard}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - flowguard-net
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: flowguard-backend
+    restart: on-failure
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-flowguard}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-flowguard}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-flowguard_dev_secret}
+      WORKER_ID: flowguard-worker-docker
+      FLOWGUARD_CORS_ALLOWED_ORIGINS: http://localhost:3000,http://localhost:5173,http://frontend:80
+    ports:
+      - "8080:8080"
+    networks:
+      - flowguard-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: flowguard-frontend
+    restart: on-failure
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+    networks:
+      - flowguard-net
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  flowguard-net:
+    driver: bridge

@@ -1,0 +1,109 @@
+spring:
+  application:
+    name: flowguard-engine
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local-h2}
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when_authorized
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+flowguard:
+  cors:
+    allowed-origins: ${FLOWGUARD_CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}
+  analytics:
+    min-baseline-samples: 5
+    max-history-samples: 100
+  engine:
+    worker-id: ${WORKER_ID:flowguard-worker-1}
+    lease-duration-seconds: 25
+    recovery-interval-seconds: 10
+    retry-poll-interval-seconds: 2
+    allow-failure-injection: true
+    retry:
+      max-attempts: 3
+      initial-delay-seconds: 2
+      multiplier: 2.0
+      max-delay-seconds: 30
+      jitter-factor: 0.2
+
+---
+spring:
+  config:
+    activate:
+      on-profile: dev
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/flowguard}
+    username: ${SPRING_DATASOURCE_USERNAME:flowguard}
+    password: ${SPRING_DATASOURCE_PASSWORD:flowguard_dev_secret}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+    show-sql: false
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+
+---
+spring:
+  config:
+    activate:
+      on-profile: local-h2
+  datasource:
+    url: jdbc:h2:mem:flowguard;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
+    username: sa
+    password: 
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+  flyway:
+    enabled: false
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+
+---
+spring:
+  config:
+    activate:
+      on-profile: prod
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+flowguard:
+  engine:
+    allow-failure-injection: false
