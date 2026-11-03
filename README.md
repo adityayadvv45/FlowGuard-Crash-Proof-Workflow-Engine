@@ -710,7 +710,7 @@ Potential next steps include:
 6. Add provider-backed payment idempotency if a real payment integration is introduced.
 7. Validate multi-instance recovery and polling behavior under realistic load.
 8. Expand operational documentation with verified deployment and troubleshooting procedures.
-
+9. Add backend-enforced authentication and authorization
 ---
 
 ## Author
